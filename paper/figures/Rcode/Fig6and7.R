@@ -1,0 +1,392 @@
+rm(list=ls())
+cat("\014")
+library(dplyr)
+library(ggplot2)
+library(PITE)
+library(ggpubr)
+
+alpha = 0.05
+img.width  = 3.14
+img.height = 3.14
+path = NULL
+# # If running interactive, probide package path
+rproj <- rprojroot::find_package_root_file()
+path.figures <- paste0(rproj, "/paper/figures/")
+
+
+### NULL Case ----------------------------------------------------------------------------
+path       <- "/sim/survival/0predictive/"
+path <- paste0(rproj, path)
+path.data <- paste0(path, "results/data/")
+path.plot <- paste0(path, "results/plots/")
+
+cat("Getting data from: ", path.data, "\n")
+cat("Saving plots to: ", path.plot, "\n")
+files.2 <- list.files(path=path.data)
+## Coefficients DATA ----
+n = c(100,400,700,1000)
+files.2.null    <- files.2[grep(files.2, pattern = "result.null")]
+files.2.cox     <- files.2[grep(files.2, pattern = "result.cox")]
+files.2.lasso   <- files.2[grep(files.2, pattern = "result.lasso")]
+files.2.reduced <- files.2[grep(files.2, pattern = "result.reduced")]
+
+
+i = files.2.cox[1]
+
+results.coeficients <- data.frame()
+results.score <- data.frame()
+for(i in n){
+  load(paste0(path.data, "result.null", i, ".Rda"))
+  b <- do.call(rbind,
+               lapply(1:1000,
+                      function(x)
+                        cbind(result.null[[x]]$scores, method="ATE", n = i, nsim = x)
+               ))
+  results.score <- rbind(results.score,
+                         b)
+}
+for(i in n){
+  load(paste0(path.data, "result.cox", i, ".Rda"))
+  b <- do.call(rbind,
+               lapply(1:1000,
+                      function(x)
+                        cbind(result.cox[[x]]$scores, method="cox", n = i, nsim = x)
+               ))
+  results.score <- rbind(results.score,
+                         b)
+}
+for(i in n){
+  load(paste0(path.data, "result.lasso", i, ".Rda"))
+  b <- do.call(rbind,
+               lapply(1:1000,
+                      function(x)
+                        cbind(result.lasso[[x]]$scores, method="cox-lasso", n = i, nsim = x)
+               ))
+  results.score <- rbind(results.score,
+                         b)
+}
+for(i in n){
+  load(paste0(path.data, "result.reduced", i, ".Rda"))
+  b <- do.call(rbind,
+               lapply(1:1000,
+                      function(x)
+                        cbind(result.reduced[[x]]$scores, method="cox-reduced", n = i, nsim = x)
+               ))
+  results.score <- rbind(results.score,
+                         b)
+}
+
+results.score$method       <- factor(results.score$method, levels = c("ATE", "cox","cox-reduced","cox-lasso"))
+
+# Rename levels of factor
+levels(results.score$method) = c("ATE", "full","reduced", "Lasso")
+
+# Re-order levels of factor
+results.score$method       <- factor(results.score$method,       levels = c("ATE", "full", "Lasso","reduced"))
+
+
+
+###############################################################################
+## Plots  ----------------------------------------------------------
+
+myPal <- c("black","#EE4035", "#F3A530", "#56B949", "#82b6cc","#0f5e7f","#024460")
+names(myPal) <- c("ATE", "full", "Lasso","reduced", "reduced-Scheffe", "rLasso", "rLasso-2")
+myShape <- c(NA,16,17,15,3,12,13)
+names(myShape) <- c("ATE", "full", "Lasso","reduced", "reduced-Scheffe", "rLasso", "rLasso-2")
+
+## Plot PITE ------------------------------------------------------------------
+## ***Coverage for PITE  -------
+
+nsim=1000
+p=alpha
+q=1-p
+e=1.96*sqrt(p*q/nsim)
+
+results.score %>%
+  mutate(N = (n)) %>%
+  group_by(method, N) %>%
+  summarize(cover = mean(cover, na.rm=T)) %>%
+  ggplot() +
+  ylim(c(0.7,1)) +
+  geom_line(aes(x = N, y=cover, color=method,  group=method), linetype = 2, size=0.15) +
+  geom_point(aes(x = N, y=cover, color=method, shape = method, #fill = method,
+                 group=method), size = 1) +
+  geom_hline(yintercept=1-alpha+e, linetype=3, size=0.1) +
+  geom_hline(yintercept=1-alpha, size=0.1) +
+  geom_hline(yintercept=1-alpha-e, linetype=3, size=0.1) +
+  scale_x_continuous(breaks = c(0,n), limits = c(0,1000)) +
+  labs(y="Coverage", x= "Sample size (n)") +
+  scale_color_manual(name = "Method", values = myPal) +
+  scale_fill_manual(name = "Method", values = myPal) +
+  scale_shape_manual(name = "Method", values = myShape) +
+  guides(shape = guide_legend(title = "Method")) +
+  # ggtitle("Coverage for PITE")+
+  theme_bw()  +
+  theme(strip.background = element_blank(),
+        panel.grid = element_blank(),
+        title = element_text(size = 7),
+        strip.text   = element_text(size = 7),
+        strip.text.y = element_text(size = 7),
+        strip.text.x = element_text(size = 7),
+        legend.text  = element_text(size = 7),
+        legend.title = element_text(size = 7),
+        legend.title.align = 0.5,
+        axis.title.y = element_text(size = 7),
+        axis.title.x = element_text(size = 7),
+        legend.position = "none",#c(0.81, 0.15),
+        legend.key.height=unit(0.5,"line"),
+        legend.background = element_rect(fill = "transparent", colour = "transparent"),
+        axis.text    = element_text(size = 6, color = "black"),
+        axis.text.x  = element_text(size = 6, color = "black"),
+        strip.placement = "outside") -> pite_cover_null
+# pite_cover_null
+
+## ***Sensitivity and specificity ---------
+results.score %>%
+  group_by(method, n, nsim) %>%
+  summarize(sensitivity.ll = sum(Dx.ll<0    & pite.full<0)/sum(pite.full<0),
+            sensitivity    = sum(Dx   <0    & pite.full<0)/sum(pite.full<0),
+            sensitivity.ul = sum(Dx.ul<0    & pite.full<0)/sum(pite.full<0),
+            specificity.ll = sum(!(Dx.ll<0) & !(pite.full<0))/sum(!(pite.full<0)),
+            specificity    = sum(!(Dx   <0) & !(pite.full<0))/sum(!(pite.full<0)),
+            specificity.ul = sum(!(Dx.ul<0) & !(pite.full<0))/sum(!(pite.full<0))) %>%
+  ungroup() %>%
+  reshape2::melt(id.vars = c("method", "n", "nsim")) %>%
+  group_by(method, n, variable) %>%
+  summarize(value = mean(value, na.rm=T)) -> ss.data2
+ss.data2$what = rep(c("Sensitivity", "Specificity"), each=3)
+ss.data2$who  = factor(rep(c("bold(hat(B)[l])", "bold(hat(B))", "bold(hat(B)[u])"), 2),
+                       levels = c("bold(hat(B)[l])", "bold(hat(B))", "bold(hat(B)[u])"))
+head(ss.data2)
+
+ss.data2 %>% filter(what !="Specificity") -> ss.data2
+
+ss.data2 %>%
+  filter(method != "reduced")%>%
+  ggplot() +
+  # facet_wrap(~n, nrow = 1)+
+  # geom_hline(yintercept=0) +
+  geom_point(aes(x = n, y=value, color=method, group=method, shape = method), size=1) +
+  geom_line(aes(x = n, y=value, color=method, group=method), linetype = 2, size=0.15) +
+  facet_grid(what ~ who, switch = "y", labeller = label_parsed) +
+  scale_x_continuous(breaks = c(0,n), limits = c(0,1000)) +
+  scale_y_continuous(name = "", limits=c(0,1.01)) + #, expand = c(0,0)) +
+  labs(color = "Method", shape = "Method", x = "Sample Size (n)") +
+  scale_color_manual(name = "Method", values = myPal) +
+  scale_fill_manual(name = "Method", values = myPal) +
+  scale_shape_manual(name = "Method", values = myShape) +
+  theme_bw() +
+  theme(strip.background = element_blank(),
+        panel.grid = element_blank(),
+        strip.text   = element_text(size = 7),
+        strip.text.y = element_text(size = 7),
+        strip.text.x = element_text(size = 9),
+        legend.text  = element_text(size = 8),
+        legend.title = element_text(size = 8),
+        legend.title.align = 0.5,
+        axis.title.y = element_blank(),
+        axis.title.x = element_text(size = 7),
+        axis.text    = element_text(size = 7, color = "black"),
+        axis.text.x  = element_text(size = 7, color = "black"),
+        strip.placement = "outside") -> ss.plot_null
+  # ss.plot_null
+
+  ### PREDICTIVE Case ----------------------------------------------------------------------------
+  path       <- "/sim/survival/2predictive/"
+  path <- paste0(rproj, path)
+  path.data <- paste0(path, "results/data/")
+  path.plot <- paste0(path, "results/plots/")
+
+  files.2 <- list.files(path=path.data)
+  ## Coefficients DATA ----
+  n = c(100,400,700,1000)
+  files.2.null    <- files.2[grep(files.2, pattern = "result.null")]
+  files.2.cox     <- files.2[grep(files.2, pattern = "result.cox")]
+  files.2.lasso   <- files.2[grep(files.2, pattern = "result.lasso")]
+  files.2.reduced <- files.2[grep(files.2, pattern = "result.reduced")]
+
+
+  i = files.2.cox[1]
+
+  results.coeficients <- data.frame()
+  results.score <- data.frame()
+  for(i in n){
+    load(paste0(path.data, "result.null", i, ".Rda"))
+    b <- do.call(rbind,
+                 lapply(1:1000,
+                        function(x)
+                          cbind(result.null[[x]]$scores, method="ATE", n = i, nsim = x)
+                 ))
+    results.score <- rbind(results.score,
+                           b)
+  }
+  for(i in n){
+    load(paste0(path.data, "result.cox", i, ".Rda"))
+    b <- do.call(rbind,
+                 lapply(1:1000,
+                        function(x)
+                          cbind(result.cox[[x]]$scores, method="cox", n = i, nsim = x)
+                 ))
+    results.score <- rbind(results.score,
+                           b)
+  }
+  for(i in n){
+    load(paste0(path.data, "result.lasso", i, ".Rda"))
+    b <- do.call(rbind,
+                 lapply(1:1000,
+                        function(x)
+                          cbind(result.lasso[[x]]$scores, method="cox-lasso", n = i, nsim = x)
+                 ))
+    results.score <- rbind(results.score,
+                           b)
+  }
+  for(i in n){
+    load(paste0(path.data, "result.reduced", i, ".Rda"))
+    b <- do.call(rbind,
+                 lapply(1:1000,
+                        function(x)
+                          cbind(result.reduced[[x]]$scores, method="cox-reduced", n = i, nsim = x)
+                 ))
+    results.score <- rbind(results.score,
+                           b)
+  }
+
+  results.score$method       <- factor(results.score$method, levels = c("ATE", "cox","cox-reduced","cox-lasso"))
+
+  # Rename levels of factor
+  levels(results.score$method) = c("ATE", "full","reduced", "Lasso")
+
+  # Re-order levels of factor
+  results.score$method       <- factor(results.score$method,       levels = c("ATE", "full", "Lasso","reduced"))
+
+  ###############################################################################
+  ## Plots  ----------------------------------------------------------
+  myPal <- c("black","#EE4035", "#F3A530", "#56B949", "#82b6cc","#0f5e7f","#024460")
+  names(myPal) <- c("ATE", "full", "Lasso","reduced", "reduced-Scheffe", "rLasso", "rLasso-2")
+  myShape <- c(NA,16,17,15,3,12,13)
+  names(myShape) <- c("ATE", "full", "Lasso","reduced", "reduced-Scheffe", "rLasso", "rLasso-2")
+
+  ## Plot PITE ------------------------------------------------------------------
+  ## ***Coverage for PITE  -------
+
+  nsim=1000
+  p=alpha
+  q=1-p
+  e=1.96*sqrt(p*q/nsim)
+
+  results.score %>%
+    mutate(N = (n)) %>%
+    group_by(method, N) %>%
+    summarize(cover = mean(cover, na.rm=T)) %>%
+    ggplot() +
+    ylim(c(0.7,1)) +
+    geom_line(aes(x = N, y=cover, color=method,  group=method), linetype = 2, size=0.15) +
+    geom_point(aes(x = N, y=cover, color=method, shape = method, #fill = method,
+                   group=method), size = 1) +
+    geom_hline(yintercept=1-alpha+e, linetype=3, size=0.1) +
+    geom_hline(yintercept=1-alpha, size=0.1) +
+    geom_hline(yintercept=1-alpha-e, linetype=3, size=0.1) +
+    scale_x_continuous(breaks = c(0,n), limits = c(0,1000)) +
+    labs(y="Coverage", x= "Sample size (n)") +
+    scale_color_manual(name = "Method", values = myPal) +
+    scale_fill_manual(name = "Method", values = myPal) +
+    scale_shape_manual(name = "Method", values = myShape) +
+    guides(shape = guide_legend(title = "Method")) +
+    # ggtitle("Coverage for PITE")+
+    theme_bw()  +
+    theme(strip.background = element_blank(),
+          panel.grid = element_blank(),
+          title = element_text(size = 7),
+          strip.text   = element_text(size = 7),
+          strip.text.y = element_text(size = 7),
+          strip.text.x = element_text(size = 7),
+          legend.text  = element_text(size = 7),
+          legend.title = element_text(size = 7),
+          legend.title.align = 0.5,
+          axis.title.y = element_text(size = 7),
+          axis.title.x = element_text(size = 7),
+          legend.position = c(0.81, 0.15),
+          legend.key.height=unit(0.5,"line"),
+          legend.background = element_rect(fill = "transparent", colour = "transparent"),
+          axis.text    = element_text(size = 6, color = "black"),
+          axis.text.x  = element_text(size = 6, color = "black"),
+          strip.placement = "outside") -> pite_cover_pred
+  # pite_cover_pred
+
+  ## ***Sensitivity and specificity ---------
+  results.score %>%
+    group_by(method, n, nsim) %>%
+    summarize(sensitivity.ll = sum(Dx.ll<0    & pite.full<0)/sum(pite.full<0),
+              sensitivity    = sum(Dx   <0    & pite.full<0)/sum(pite.full<0),
+              sensitivity.ul = sum(Dx.ul<0    & pite.full<0)/sum(pite.full<0),
+              specificity.ll = sum(!(Dx.ll<0) & !(pite.full<0))/sum(!(pite.full<0)),
+              specificity    = sum(!(Dx   <0) & !(pite.full<0))/sum(!(pite.full<0)),
+              specificity.ul = sum(!(Dx.ul<0) & !(pite.full<0))/sum(!(pite.full<0))) %>%
+    ungroup() %>%
+    reshape2::melt(id.vars = c("method", "n", "nsim")) %>%
+    group_by(method, n, variable) %>%
+    summarize(value = mean(value, na.rm=T)) -> ss.data2
+  ss.data2$what = rep(c("Sensitivity", "Specificity"), each=3)
+  ss.data2$who  = factor(rep(c("bold(hat(B)[l])", "bold(hat(B))", "bold(hat(B)[u])"), 2),
+                         levels = c("bold(hat(B)[l])", "bold(hat(B))", "bold(hat(B)[u])"))
+  head(ss.data2)
+
+  ss.data2 %>%
+    filter(method != "reduced")%>%
+    ggplot() +
+    # facet_wrap(~n, nrow = 1)+
+    # geom_hline(yintercept=0) +
+    geom_point(aes(x = n, y=value, color=method, group=method, shape = method), size=1) +
+    geom_line(aes(x = n, y=value, color=method, group=method), linetype = 2, size=0.15) +
+    facet_grid(what ~ who, switch = "y", labeller = label_parsed) +
+    scale_x_continuous(breaks = c(0,n), limits = c(0,1000)) +
+    scale_y_continuous(name = "", limits=c(0,1.01)) + #, expand = c(0,0)) +
+    labs(color = "Method", shape = "Method", x = "Sample size (n)") +
+    scale_color_manual(name = "Method", values = myPal) +
+    scale_fill_manual(name = "Method", values = myPal) +
+    scale_shape_manual(name = "Method", values = myShape) +
+    theme_bw() +
+    theme(strip.background = element_blank(),
+          panel.grid = element_blank(),
+          strip.text   = element_text(size = 7),
+          strip.text.y = element_text(size = 7),
+          strip.text.x = element_text(size = 9),
+          legend.text  = element_text(size = 8),
+          legend.title = element_text(size = 8),
+          legend.title.align = 0.5,
+          axis.title.y = element_blank(),
+          axis.title.x = element_text(size = 7),
+          axis.text    = element_text(size = 7, color = "black"),
+          axis.text.x  = element_text(size = 7, color = "black"),
+          strip.placement = "outside") -> ss.plot_pred
+  # ss.plot_pred
+
+
+
+  ## Print PDF files ---------
+  ggarrange(pite_cover_null,
+            pite_cover_pred,
+            heights = c(1,1),
+            labels = c("A", "B"),
+            # common.legend = TRUE,
+            # legend = "right",
+            ncol=2, nrow = 1) -> plot6
+  img.width  = 3.14
+  img.height = 3.14
+
+  ggsave(paste0(path.figures,"Fig6.pdf"), plot = plot6,
+         width = 2*img.width, height = img.height, units = "in")
+  ggsave(paste0(path.figures,"Fig6.eps"), plot = plot6,
+         width = 2*img.width, height = img.height, units = "in")
+
+
+  ggarrange(ss.plot_null,
+            ss.plot_pred,
+            heights = c(5,8),
+            labels = c("A", "B"),
+            common.legend = TRUE, legend = "right",
+            ncol=1, nrow = 2) -> plot7
+  ggsave(paste0(path.figures,"Fig7.pdf"), plot = plot7, width = 17, height = 15, units = "cm")
+  ggsave(paste0(path.figures,"Fig7.eps"), plot = plot7, width = 17, height = 15, units = "cm")
+
+  rm(list=ls())

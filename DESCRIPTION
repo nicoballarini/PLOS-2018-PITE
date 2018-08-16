@@ -1,0 +1,24 @@
+Package: PITE
+Type: Package
+Title: Reproducible results for Ballarini et al. (2017)
+Version: 0.1.0
+Authors@R: c(person("Nicolas", "Ballarini", email = "nicolas.ballarini@meduniwien.ac.at", role = c("aut", "cre")),
+  person("Ryan", "Tibshirani", role = "ctb"),
+  person("Rob", "Tibshirani", role = "ctb"), 
+  person("Jonathan", "Taylor", role = "ctb"), 
+  person("Joshua", "Loftus", role = "ctb"),
+  person('Stephen", "Reid', role = "ctb"))
+Description: Package with code, results and functions for article.
+License: GPL-2
+LazyData: TRUE
+Depends:  broom,
+          dplyr,
+          glmnet,
+          MASS,
+          knitr,
+          selectiveInference,
+          R.utils
+Suggest: pryr,
+         dplyr,
+         ggpubr
+RoxygenNote: 5.0.1
